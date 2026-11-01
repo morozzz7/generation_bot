@@ -1,4 +1,3 @@
-
 package main
 
 import (
@@ -14,7 +13,7 @@ func main() {
 
 	imageData, err := client.Generate(
 		context.Background(),
-		"A futuristic city",
+		"messi scroing a gol",
 	)
 	if err != nil {
 		panic(err)

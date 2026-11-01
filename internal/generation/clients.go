@@ -1,13 +1,13 @@
 package generation
 
 import (
-	"context"
-	"time"
-	"net/http"
-	"io"
-	"fmt"
-	"encoding/json"
 	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"time"
 )
 
 type Client struct {
@@ -36,7 +36,7 @@ func (c *Client) Generate(ctx context.Context, prompt string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
-	
+
 	req, err := http.NewRequestWithContext(
 		ctx,
 		http.MethodPost,
@@ -51,10 +51,10 @@ func (c *Client) Generate(ctx context.Context, prompt string) ([]byte, error) {
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(req)
-		if err != nil {
-			return nil, fmt.Errorf("send request: %w", err)
-		}
-		defer resp.Body.Close()
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
