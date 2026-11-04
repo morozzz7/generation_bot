@@ -1,4 +1,5 @@
 from io import BytesIO
+from uuid import UUID
 import time
 import logging
 from contextlib import asynccontextmanager
@@ -7,8 +8,10 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 import torch
 
-from .model.inference import ImageGenerator
+from .model.inference import ImageGenerator, GenerationCancelled
 from .schemas import GenerateRequest
+from .task_manager import TaskManager
+
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -56,6 +59,8 @@ def generate(
     data: GenerateRequest,
     request: Request,
 ):
+    task_id = str(request.task_id)
+    task_manager: TaskManager = app.state.task_manager
     generator = getattr(request.app.state, "generator", None)
 
     if generator is None:
@@ -111,4 +116,32 @@ def generate(
             detail="Image generation failed",
         )
 
+    except GenerationCancelled:
+        logger.info("Generation cancelled: task_id=%s", task_id)
 
+        raise HTTPException(
+            status_code=409,
+            detail="Generation cancelled",
+        )
+
+    finally:
+        task_manager.remove(task_id)
+
+@app.post("/cancel/{task_id}")
+def cancel_generation(task_id: UUID):
+    task_manager: TaskManager = app.state.task_manager
+
+    cancelled = task_manager.cancel(str(task_id))
+
+    if not cancelled:
+        raise HTTPException(
+            status_code=404,
+            detail="Task not found or already finished",
+        )
+
+    logger.info("Cancellation requested: task_id=%s", task_id)
+
+    return {
+        "task_id": str(task_id),
+        "status": "cancellation_requested",
+    }

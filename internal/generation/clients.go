@@ -74,3 +74,39 @@ func (c *Client) Generate(ctx context.Context, prompt string) ([]byte, error) {
 	}
 	return imageData, nil
 }
+
+func (c *Client) Cancel(ctx context.Context, taskID string) error {
+    endpoint := fmt.Sprintf(
+        "%s/cancel/%s",
+        strings.TrimRight(c.baseURL, "/"),
+        taskID,
+    )
+
+    req, err := http.NewRequestWithContext(
+        ctx,
+        http.MethodPost,
+        endpoint,
+        nil,
+    )
+    if err != nil {
+        return fmt.Errorf("create cancellation request: %w", err)
+    }
+
+    resp, err := c.httpClient.Do(req)
+    if err != nil {
+        return fmt.Errorf("send cancellation request: %w", err)
+    }
+    defer resp.Body.Close()
+
+    if resp.StatusCode != http.StatusOK {
+        body, _ := io.ReadAll(resp.Body)
+
+        return fmt.Errorf(
+            "cancellation API returned %s: %s",
+            resp.Status,
+            strings.TrimSpace(string(body)),
+        )
+    }
+
+    return nil
+}
