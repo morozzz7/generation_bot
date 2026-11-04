@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"time"
+	"strings"
 )
 
 type Client struct {
@@ -16,6 +17,7 @@ type Client struct {
 }
 
 type GenerateRequest struct {
+	TaskID string `json:"task_id"`
 	Prompt string `json:"prompt"`
 }
 
@@ -28,9 +30,10 @@ func NewClient(baseURL string) *Client {
 	}
 }
 
-func (c *Client) Generate(ctx context.Context, prompt string) ([]byte, error) {
+func (c *Client) Generate(ctx context.Context, taskID string, prompt string) ([]byte, error) {
 	// 1. Кодируем запрос в JSON
 	requestBody, err := json.Marshal(GenerateRequest{
+		TaskID: taskID,
 		Prompt: prompt,
 	})
 	if err != nil {
@@ -110,3 +113,5 @@ func (c *Client) Cancel(ctx context.Context, taskID string) error {
 
     return nil
 }
+
+

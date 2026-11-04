@@ -13,22 +13,20 @@ class ImageGenerator:
 
     @torch.inference_mode()
     def generate(
-    self,
-    prompt: str,
-    negative_prompt: str = "",
-    steps: int = 25,
-    seed: int = -1,
-    cancel_event: threading.Event | None = None,
-):
+        self,
+        prompt: str,
+        negative_prompt: str = "",
+        steps: int = 25,
+        seed: int = -1,
+        cancel_event: threading.Event | None = None,
+    ):
         if not prompt.strip():
             raise ValueError("Prompt cannot be empty")
 
         if seed < 0:
             seed = secrets.randbits(32)
 
-        generator = torch.Generator(
-            device=self.pipe.device
-        ).manual_seed(seed)
+        generator = torch.Generator(device=self.pipe.device).manual_seed(seed)
 
         def callback_on_step_end(pipe, step, timestep, callback_kwargs):
             if cancel_event is not None and cancel_event.is_set():
@@ -59,12 +57,11 @@ class ImageGenerator:
         elapsed = time.perf_counter() - start_time
 
         print(
-            f"Generation completed in {elapsed:.2f}s "
-            f"(seed={seed}, steps={steps})"
+            f"Generation completed in {elapsed:.2f}s " f"(seed={seed}, steps={steps})"
         )
 
         return image, seed
 
-    
+
 class GenerationCancelled(Exception):
     """Raised when an image generation task is cancelled."""

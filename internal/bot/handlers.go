@@ -8,6 +8,7 @@ import (
 
 	telegrambot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
+	"github.com/google/uuid"
 
 	"generation_bot/internal/generation"
 )
@@ -48,8 +49,19 @@ func (h *Handler) HandleMessage(
 	}
 
 	if h.state.Get(userID) == StateWaitingForPrompt {
-		h.state.Set(userID, StateIdle)
-		h.generateImage(ctx, b, chatID, text)
+		taskID := uuid.NewString()
+	
+		h.state.SetTask(userID, taskID)
+	
+		go h.generateImage(
+			context.Background(),
+			b,
+			chatID,
+			userID,
+			taskID,
+			text,
+		)
+	
 		return
 	}
 
@@ -58,35 +70,44 @@ func (h *Handler) HandleMessage(
 }
 
 func (h *Handler) generateImage(
-	ctx context.Context,
-	b *telegrambot.Bot,
-	chatID int64,
-	prompt string,
+    ctx context.Context,
+    b *telegrambot.Bot,
+    chatID int64,
+    userID int64,
+    taskID string,
+    prompt string,
 ) {
-	sendMessage(ctx, b, chatID, "Generating your image... 🎨")
+    defer h.state.ClearTask(userID, taskID)
 
-	imageData, err := h.client.Generate(ctx, prompt)
-	if err != nil {
-		log.Printf("image generation failed: %v", err)
-		sendMessage(ctx, b, chatID,
-			"Sorry, image generation failed. Please try again.")
-		return
-	}
+    sendMessage(ctx, b, chatID, "Generating your image... 🎨")
 
-	_, err = b.SendPhoto(ctx, &telegrambot.SendPhotoParams{
-		ChatID: chatID,
-		Photo: &models.InputFileUpload{
-			Filename: "generated.png",
-			Data:     bytes.NewReader(imageData),
-		},
-		Caption: "Here is your generated image! ✨",
-	})
+    imageData, err := h.client.Generate(ctx, taskID, prompt)
 
-	if err != nil {
-		log.Printf("failed to send image: %v", err)
-		sendMessage(ctx, b, chatID,
-			"Image was generated, but I couldn't send it.")
-	}
+    if err != nil {
+        log.Printf("generation failed (task %s): %v", taskID, err)
+
+        if strings.Contains(err.Error(), "Generation cancelled") {
+            sendMessage(ctx, b, chatID, "Generation cancelled. ✋")
+            return
+        }
+
+        sendMessage(ctx, b, chatID, "Sorry, image generation failed.")
+        return
+    }
+
+    _, err = b.SendPhoto(ctx, &telegrambot.SendPhotoParams{
+        ChatID: chatID,
+        Photo: &models.InputFileUpload{
+            Filename: "generated.png",
+            Data: bytes.NewReader(imageData),
+        },
+        Caption: "Here is your generated image! ✨",
+    })
+
+    if err != nil {
+        log.Printf("failed to send image: %v", err)
+        sendMessage(ctx, b, chatID, "Image was generated, but I couldn't send it.")
+    }
 }
 
 func sendMessage(

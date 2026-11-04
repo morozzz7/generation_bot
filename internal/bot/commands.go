@@ -3,6 +3,7 @@ package bot
 import (
 	"context"
 	"strings"
+	"log"
 
 	telegrambot "github.com/go-telegram/bot"
 )
@@ -28,7 +29,7 @@ func (h *Handler) handleCommand(
 			"Available commands:\n"+
 				"/start — start working\n"+
 				"/generate — generate an image\n"+
-				"/cancel — cancel current operation\n"+
+				"/cancel — cancel current generation\n"+
 				"/help — show help\n"+
 				"/about — information about the bot")
 
@@ -36,6 +37,31 @@ func (h *Handler) handleCommand(
 		h.state.Set(userID, StateWaitingForPrompt)
 		sendMessage(ctx, b, chatID,
 			"Send me a prompt for image generation. 📝")
+
+	case "/cancel":
+		taskID, ok := h.state.GetTask(userID)
+	
+		if !ok {
+			if h.state.Get(userID) == StateWaitingForPrompt {
+				h.state.Set(userID, StateIdle)
+				sendMessage(ctx, b, chatID, "Prompt cancelled.")
+				return
+			}
+	
+			sendMessage(ctx, b, chatID, "There is no active generation.")
+			return
+		}
+	
+		err := h.client.Cancel(ctx, taskID)
+		if err != nil {
+			log.Printf("failed to cancel task %s: %v", taskID, err)
+	
+			sendMessage(ctx, b, chatID,
+				"Could not cancel generation. It may have already finished.")
+			return
+		}
+	
+		sendMessage(ctx, b, chatID, "Cancellation requested. ✋")
 
 	default:
 		sendMessage(ctx, b, chatID,

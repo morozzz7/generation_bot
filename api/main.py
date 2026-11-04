@@ -1,6 +1,5 @@
-from io import BytesIO
+import io
 from uuid import UUID
-import time
 import logging
 from contextlib import asynccontextmanager
 
@@ -22,12 +21,14 @@ async def lifespan(app: FastAPI):
     logger.info("Loading image generation model...")
 
     app.state.generator = ImageGenerator()
+    app.state.task_manager = TaskManager()
 
     logger.info("Model loaded successfully")
 
     yield
 
     logger.info("Shutting down FastAPI")
+
 
 app = FastAPI(
     title="Image Generation API",
@@ -55,65 +56,46 @@ async def health(request: Request):
 
 
 @app.post("/generate")
-def generate(
-    data: GenerateRequest,
-    request: Request,
-):
+def generate(request: GenerateRequest):
     task_id = str(request.task_id)
     task_manager: TaskManager = app.state.task_manager
-    generator = getattr(request.app.state, "generator", None)
+    generator: ImageGenerator = app.state.generator
 
-    if generator is None:
+    try:
+        cancel_event = task_manager.register(task_id)
+    except ValueError:
         raise HTTPException(
-            status_code=503,
-            detail="Model is not loaded",
+            status_code=409,
+            detail="Task ID already exists",
         )
 
     try:
-        start_time = time.perf_counter()
+        logger.info("Starting generation: task_id=%s", task_id)
 
         image, seed = generator.generate(
-            prompt=data.prompt,
-            negative_prompt=data.negative_prompt,
-            steps=data.steps,
-            seed=data.seed,
+            prompt=request.prompt,
+            negative_prompt=request.negative_prompt,
+            steps=request.steps,
+            seed=request.seed,
+            cancel_event=cancel_event,
         )
 
-        buffer = BytesIO()
-        image.save(buffer, format="PNG")
-        buffer.seek(0)
+        if cancel_event.is_set():
+            raise GenerationCancelled()
 
-        elapsed = time.perf_counter() - start_time
+        image_buffer = io.BytesIO()
+        image.save(image_buffer, format="PNG")
+        image_buffer.seek(0)
 
-        logger.info(
-            "Image generated in %.2fs, seed=%d",
-            elapsed,
-            seed,
-        )
+        logger.info("Generation completed: task_id=%s", task_id)
 
         return StreamingResponse(
-            buffer,
+            image_buffer,
             media_type="image/png",
             headers={
+                "X-Generation-Task-ID": task_id,
                 "X-Generation-Seed": str(seed),
-                "X-Generation-Time": f"{elapsed:.2f}",
             },
-        )
-
-    except torch.cuda.OutOfMemoryError:
-        logger.exception("CUDA out of memory")
-
-        raise HTTPException(
-            status_code=503,
-            detail="GPU memory exhausted. Try again later.",
-        )
-
-    except Exception:
-        logger.exception("Image generation failed")
-
-        raise HTTPException(
-            status_code=500,
-            detail="Image generation failed",
         )
 
     except GenerationCancelled:
@@ -124,8 +106,25 @@ def generate(
             detail="Generation cancelled",
         )
 
+    except torch.cuda.OutOfMemoryError:
+        logger.exception("CUDA out of memory: task_id=%s", task_id)
+
+        raise HTTPException(
+            status_code=503,
+            detail="GPU memory exhausted",
+        )
+
+    except Exception:
+        logger.exception("Generation failed: task_id=%s", task_id)
+
+        raise HTTPException(
+            status_code=500,
+            detail="Image generation failed",
+        )
+
     finally:
         task_manager.remove(task_id)
+
 
 @app.post("/cancel/{task_id}")
 def cancel_generation(task_id: UUID):
