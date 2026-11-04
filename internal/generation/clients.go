@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"time"
 	"strings"
+	"time"
 )
+
+var ErrGenerationCancelled = errors.New("generation cancelled")
 
 type Client struct {
 	baseURL    string
@@ -17,8 +20,10 @@ type Client struct {
 }
 
 type GenerateRequest struct {
-	TaskID string `json:"task_id"`
-	Prompt string `json:"prompt"`
+	TaskID         string `json:"task_id"`
+	ModelID        string `json:"model_id"`
+	Prompt         string `json:"prompt"`
+	NegativePrompt string `json:"negative_prompt,omitempty"`
 }
 
 func NewClient(baseURL string) *Client {
@@ -30,11 +35,16 @@ func NewClient(baseURL string) *Client {
 	}
 }
 
-func (c *Client) Generate(ctx context.Context, taskID string, prompt string) ([]byte, error) {
+func (c *Client) Generate(
+	ctx context.Context,
+	taskID string,
+	modelID string,
+	prompt string) ([]byte, error) {
 	// 1. Кодируем запрос в JSON
 	requestBody, err := json.Marshal(GenerateRequest{
-		TaskID: taskID,
-		Prompt: prompt,
+		TaskID:  taskID,
+		ModelID: modelID,
+		Prompt:  prompt,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
@@ -79,39 +89,37 @@ func (c *Client) Generate(ctx context.Context, taskID string, prompt string) ([]
 }
 
 func (c *Client) Cancel(ctx context.Context, taskID string) error {
-    endpoint := fmt.Sprintf(
-        "%s/cancel/%s",
-        strings.TrimRight(c.baseURL, "/"),
-        taskID,
-    )
+	endpoint := fmt.Sprintf(
+		"%s/cancel/%s",
+		strings.TrimRight(c.baseURL, "/"),
+		taskID,
+	)
 
-    req, err := http.NewRequestWithContext(
-        ctx,
-        http.MethodPost,
-        endpoint,
-        nil,
-    )
-    if err != nil {
-        return fmt.Errorf("create cancellation request: %w", err)
-    }
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		endpoint,
+		nil,
+	)
+	if err != nil {
+		return fmt.Errorf("create cancellation request: %w", err)
+	}
 
-    resp, err := c.httpClient.Do(req)
-    if err != nil {
-        return fmt.Errorf("send cancellation request: %w", err)
-    }
-    defer resp.Body.Close()
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("send cancellation request: %w", err)
+	}
+	defer resp.Body.Close()
 
-    if resp.StatusCode != http.StatusOK {
-        body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
 
-        return fmt.Errorf(
-            "cancellation API returned %s: %s",
-            resp.Status,
-            strings.TrimSpace(string(body)),
-        )
-    }
+		return fmt.Errorf(
+			"cancellation API returned %s: %s",
+			resp.Status,
+			strings.TrimSpace(string(body)),
+		)
+	}
 
-    return nil
+	return nil
 }
-
-

@@ -39,10 +39,19 @@ func main() {
 	generationClient := generation.NewClient(apiBaseURL)
 	handler := bot.NewHandler(generationClient)
 
+
 	b, err := telegrambot.New(
 		token,
 		telegrambot.WithDefaultHandler(handler.HandleMessage),
 	)
+
+	b.RegisterHandler(
+		telegrambot.HandlerTypeCallbackQueryData,
+		"",
+		telegrambot.MatchTypePrefix,
+		handler.HandleCallbackQuery,
+	)
+
 	if err != nil {
 		log.Fatalf("failed to initialize bot: %v", err)
 	}

@@ -36,7 +36,12 @@ func (h *Handler) HandleMessage(
 
 	message := update.Message
 	chatID := message.Chat.ID
-	userID := chatID
+
+	if message.From == nil {
+		return
+	}
+
+	userID := message.From.ID
 	text := strings.TrimSpace(message.Text)
 
 	if text == "" {
@@ -48,66 +53,130 @@ func (h *Handler) HandleMessage(
 		return
 	}
 
-	if h.state.Get(userID) == StateWaitingForPrompt {
-		taskID := uuid.NewString()
-	
-		h.state.SetTask(userID, taskID)
-	
-		go h.generateImage(
-			context.Background(),
-			b,
-			chatID,
-			userID,
-			taskID,
-			text,
-		)
-	
+	taskID := uuid.NewString()
+
+	modelID, ok := h.state.StartTask(userID, taskID)
+	if !ok {
+		switch h.state.Get(userID) {
+		case StateWaitingForModel:
+			sendMessage(ctx, b, chatID, "Choose a model using the buttons above.")
+		case StateGenerating:
+			sendMessage(ctx, b, chatID, "You already have an active generation.")
+		default:
+			sendMessage(ctx, b, chatID, "Use /generate to create an image.")
+		}
 		return
 	}
 
-	sendMessage(ctx, b, chatID,
-		"Use /generate to create an image.")
+	go h.generateImage(
+		context.Background(),
+		b,
+		chatID,
+		userID,
+		taskID,
+		modelID,
+		text,
+	)
+}
+
+func (h *Handler) HandleCallbackQuery(
+	ctx context.Context,
+	b *telegrambot.Bot,
+	update *models.Update,
+) {
+	callback := update.CallbackQuery
+	if callback == nil {
+		return
+	}
+
+	_, err := b.AnswerCallbackQuery(
+		ctx,
+		&telegrambot.AnswerCallbackQueryParams{
+			CallbackQueryID: callback.ID,
+		},
+	)
+	if err != nil {
+		log.Printf("failed to answer callback query: %v", err)
+	}
+
+	chatID := callback.Message.Message.Chat.ID
+	userID := callback.From.ID
+
+	var modelID string
+
+	switch callback.Data {
+	case "model:dreamshaper":
+		modelID = "dreamshaper"
+	case "model:sdxl_turbo":
+		modelID = "sdxl_turbo"
+	default:
+		sendMessage(ctx, b, chatID, "Unknown model.")
+		return
+	}
+
+	if !h.state.SelectModel(userID, modelID) {
+		sendMessage(ctx, b, chatID, "This model selection has expired. Use /generate again.")
+		return
+	}
+
+	modelName := "DreamShaper 8"
+	if modelID == "sdxl_turbo" {
+		modelName = "SDXL Turbo"
+	}
+
+	sendMessage(
+		ctx,
+		b,
+		chatID,
+		"Selected: "+modelName+"\n\nNow send me your image prompt. 📝",
+	)
 }
 
 func (h *Handler) generateImage(
-    ctx context.Context,
-    b *telegrambot.Bot,
-    chatID int64,
-    userID int64,
-    taskID string,
-    prompt string,
+	ctx context.Context,
+	b *telegrambot.Bot,
+	chatID int64,
+	userID int64,
+	taskID string,
+	modelID string,
+	prompt string,
 ) {
-    defer h.state.ClearTask(userID, taskID)
+	defer h.state.ClearTask(userID, taskID)
 
-    sendMessage(ctx, b, chatID, "Generating your image... 🎨")
+	modelName := "DreamShaper 8"
+	if modelID == "sdxl_turbo" {
+		modelName = "SDXL Turbo"
+	}
 
-    imageData, err := h.client.Generate(ctx, taskID, prompt)
+	sendMessage(ctx, b, chatID, "Generating with "+modelName+"... 🎨")
 
-    if err != nil {
-        log.Printf("generation failed (task %s): %v", taskID, err)
+	imageData, err := h.client.Generate(ctx, taskID, modelID, prompt)
 
-        if strings.Contains(err.Error(), "Generation cancelled") {
-            sendMessage(ctx, b, chatID, "Generation cancelled. ✋")
-            return
-        }
+	if err != nil {
+		log.Printf("generation failed (task %s): %v", taskID, err)
 
-        sendMessage(ctx, b, chatID, "Sorry, image generation failed.")
-        return
-    }
+		if strings.Contains(err.Error(), "Generation cancelled") {
+			sendMessage(ctx, b, chatID, "Generation cancelled. ✋")
+			return
+		}
 
-    _, err = b.SendPhoto(ctx, &telegrambot.SendPhotoParams{
-        ChatID: chatID,
-        Photo: &models.InputFileUpload{
-            Filename: "generated.png",
-            Data: bytes.NewReader(imageData),
-        },
-        Caption: "Here is your generated image! ✨",
-    })
+		sendMessage(ctx, b, chatID, "Sorry, image generation failed.")
+		return
+	}
 
-    if err != nil {
-        log.Printf("failed to send image: %v", err)
-        sendMessage(ctx, b, chatID, "Image was generated, but I couldn't send it.")
-    }
+	_, err = b.SendPhoto(ctx, &telegrambot.SendPhotoParams{
+		ChatID: chatID,
+		Photo: &models.InputFileUpload{
+			Filename: "generated.png",
+			Data:     bytes.NewReader(imageData),
+		},
+		Caption: "Here is your generated image! ✨",
+	})
+
+	if err != nil {
+		log.Printf("failed to send image: %v", err)
+		sendMessage(ctx, b, chatID, "Image was generated, but I couldn't send it.")
+	}
 }
 
 func sendMessage(

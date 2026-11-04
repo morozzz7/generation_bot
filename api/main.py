@@ -73,6 +73,7 @@ def generate(request: GenerateRequest):
         logger.info("Starting generation: task_id=%s", task_id)
 
         image, seed = generator.generate(
+            model_id=request.model_id,
             prompt=request.prompt,
             negative_prompt=request.negative_prompt,
             steps=request.steps,
@@ -95,6 +96,7 @@ def generate(request: GenerateRequest):
             headers={
                 "X-Generation-Task-ID": task_id,
                 "X-Generation-Seed": str(seed),
+                "X-Generation-Model": request.model_id,
             },
         )
 
